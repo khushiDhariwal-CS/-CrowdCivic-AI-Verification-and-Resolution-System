@@ -895,7 +895,7 @@ export default function AuthorityDashboard() {
       let res: Response;
 
       try {
-        if (recordedVideoBlob) {
+        if (recordedVideoBlob && recordedVideoBlob.size <= 4 * 1024 * 1024) {
           const formData = new FormData();
           formData.append('video', recordedVideoBlob, `resolution_${targetIssue.ticketId}.webm`);
           formData.append('metadata', JSON.stringify(metadata));
