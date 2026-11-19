@@ -1,4 +1,4 @@
-import { initializeApp, getApps, getApp, App } from 'firebase-admin/app';
+import { initializeApp, getApps, getApp, cert, App } from 'firebase-admin/app';
 import { getFirestore, Firestore } from 'firebase-admin/firestore';
 import { getAuth, Auth, DecodedIdToken } from 'firebase-admin/auth';
 import defaultConfig from '../firebase-applet-config.json';
@@ -8,7 +8,31 @@ let cachedAdminApp: App | null = null;
 export function getAdminApp(): App {
   if (cachedAdminApp) return cachedAdminApp;
   const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || defaultConfig.projectId;
-  cachedAdminApp = getApps().length > 0 ? getApp() : initializeApp({ projectId });
+
+  if (getApps().length > 0) {
+    cachedAdminApp = getApp();
+    return cachedAdminApp;
+  }
+
+  const raw = process.env.FIREBASE_SERVICE_ACCOUNT;
+  if (raw) {
+    try {
+      const json = raw.trim().startsWith('{')
+        ? raw
+        : Buffer.from(raw, 'base64').toString('utf8');
+      const sa = JSON.parse(json);
+      if (sa.private_key) sa.private_key = sa.private_key.replace(/\\n/g, '\n');
+      cachedAdminApp = initializeApp({
+        credential: cert(sa),
+        projectId: sa.project_id || projectId,
+      });
+      return cachedAdminApp;
+    } catch (e) {
+      console.error('Invalid FIREBASE_SERVICE_ACCOUNT, falling back to default credentials', e);
+    }
+  }
+
+  cachedAdminApp = initializeApp({ projectId });
   return cachedAdminApp;
 }
 
