@@ -1,0 +1,30 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Citizen complaint photographs: strictly isolated under complaints/{complaintId}/
+    match /complaints/{complaintId}/{fileName} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn()
+                   && request.resource.size < 10 * 1024 * 1024
+                   && request.resource.contentType.matches('image/.*');
+    }
+
+    // Authority 30-second resolution videos: strictly isolated under resolutions/{complaintId}/
+    match /resolutions/{complaintId}/{fileName} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn()
+                   && request.resource.size < 50 * 1024 * 1024
+                   && request.resource.contentType.matches('video/.*');
+    }
+
+    // Deny all other arbitrary paths
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

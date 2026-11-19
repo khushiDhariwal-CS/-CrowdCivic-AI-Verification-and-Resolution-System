@@ -1,0 +1,337 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // --- GLOBAL DEFAULT-DENY SAFETY NET ---
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- REUSABLE VALIDATION & IDENTITY PRIMITIVES ---
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isBootstrappedAdmin() {
+      return isSignedIn()
+        && request.auth.token.email == 'dhariwalraj37@gmail.com'
+        && request.auth.token.email_verified == true;
+    }
+
+    function userDocExists() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function userRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function isAdmin() {
+      return isBootstrappedAdmin() || (userDocExists() && userRole() == 'admin');
+    }
+
+    function isAuthority() {
+      return userDocExists() && userRole() == 'authority';
+    }
+
+    // --- SCHEMA VALIDATION HELPERS (SYNCED WITH firebase-blueprint.json) ---
+    function isValidUser(data) {
+      return data.keys().hasAll(['email', 'role'])
+        && data.keys().hasOnly([
+          'uid', 'email', 'name', 'role', 'department',
+          'fcmToken', 'fcmUpdatedAt', 'approvedBy', 'authAccountCreated',
+          'createdAt', 'updatedAt'
+        ])
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 200
+        && data.role in ['citizen', 'authority', 'admin']
+        && (!('uid' in data) || (data.uid is string && data.uid.size() <= 128))
+        && (!('name' in data) || (data.name is string && data.name.size() <= 120))
+        && (!('department' in data) || (data.department is string && data.department.size() <= 160))
+        && (!('fcmToken' in data) || (data.fcmToken is string && data.fcmToken.size() <= 512));
+    }
+
+    function isValidIssue(data) {
+      return data.keys().hasAll(['ticketId', 'userId', 'title', 'category', 'severity', 'status'])
+        && data.keys().hasOnly([
+          'ticketId', 'userId', 'userEmail', 'title', 'category', 'issueType',
+          'description', 'severity', 'department', 'publicSafetyAlert',
+          'estimatedResolutionTime', 'imageUrl', 'imageStoragePath', 'imageHash',
+          'status', 'assignedAuthorityUid', 'assignedAuthorityEmail', 'assignedAt',
+          'acknowledgedBy', 'acknowledgedAt', 'statusHistory',
+          'location', 'aiAnalysis', 'resolutionAiAudit', 'resolutionVideoUrl',
+          'resolutionVideoPath', 'resolutionVideoFrames', 'rveOutcome',
+          'manualReviewQueue', 'manualReviewDecision', 'resolvedAt', 'resolvedBy',
+          'upvotes', 'parentId', 'isDuplicate', 'duplicateCount',
+          'supportersCount', 'supporters', 'evidencePhotos', 'duplicateMatchInfo',
+          'communityVotes', 'voteStats', 'isDisputed', 'adminFlagged',
+          'adminFlagReason', 'adminFlaggedAt', 'createdAt', 'updatedAt'
+        ])
+        && data.ticketId is string && data.ticketId.size() <= 64
+        && data.userId is string && data.userId.size() <= 128
+        && data.title is string && data.title.size() <= 240
+        && data.category is string && data.category.size() <= 120
+        && data.severity in ['Critical', 'High', 'Medium', 'Low']
+        && data.status in [
+          'Submitted', 'Assigned', 'Acknowledged', 'In Progress',
+          'Under Verification', 'Resolved', 'Closed', 'Rejected', 'Resolution Failed'
+        ]
+        && (!('description' in data) || (data.description is string && data.description.size() <= 2500))
+        && (!('department' in data) || (data.department is string && data.department.size() <= 200))
+        && (!('supporters' in data) || (data.supporters is list && data.supporters.size() <= 500))
+        && (!('evidencePhotos' in data) || (data.evidencePhotos is list && data.evidencePhotos.size() <= 50))
+        && (!('communityVotes' in data) || (data.communityVotes is list && data.communityVotes.size() <= 500));
+    }
+
+    function isValidAssignment(data) {
+      return data.keys().hasAll(['complaintId', 'department', 'authorityUid', 'status'])
+        && data.keys().hasOnly([
+          'complaintId', 'ticketId', 'department', 'authorityUid',
+          'authorityEmail', 'status', 'notes', 'updatedAt'
+        ])
+        && data.complaintId is string && data.complaintId.size() <= 128
+        && data.department is string && data.department.size() <= 200
+        && data.authorityUid is string && data.authorityUid.size() <= 128
+        && data.status is string && data.status.size() <= 64;
+    }
+
+    function isValidResolutionVerification(data) {
+      return data.keys().hasAll(['complaintId', 'authorityUid', 'finalOutcome', 'createdAt'])
+        && data.keys().hasOnly([
+          'complaintId', 'ticketId', 'authorityUid', 'authorityEmail',
+          'videoStorageUrl', 'videoStoragePath', 'uploadGps',
+          'videoTimestamp', 'serverReceiptTimestamp', 'extractedKeyframesCount',
+          'keyframeExtractionError', 'rveResult', 'finalOutcome', 'createdAt'
+        ])
+        && data.complaintId is string && data.complaintId.size() <= 128
+        && data.authorityUid is string && data.authorityUid.size() <= 128
+        && data.finalOutcome in ['Verified', 'Rejected']
+        && data.createdAt is string && data.createdAt.size() <= 64;
+    }
+
+    function isValidManualQueueItem(data) {
+      return data.keys().hasAll(['complaintId', 'ticketId', 'reviewStatus', 'createdAt'])
+        && data.keys().hasOnly([
+          'complaintId', 'ticketId', 'title', 'category', 'department',
+          'authorityUid', 'authorityEmail', 'failureGate', 'rejectionReason',
+          'potentiallyTamperedEvidence', 'rveResult', 'videoStorageUrl',
+          'originalImageUrl', 'sampleKeyframes', 'reviewStatus',
+          'reviewedBy', 'reviewedAt', 'reviewNotes', 'createdAt'
+        ])
+        && data.complaintId is string && data.complaintId.size() <= 128
+        && data.ticketId is string && data.ticketId.size() <= 64
+        && data.reviewStatus in ['Pending Review', 'Approved by Admin', 'Returned for Rework']
+        && data.createdAt is string && data.createdAt.size() <= 64
+        && (!('sampleKeyframes' in data) || (data.sampleKeyframes is list && data.sampleKeyframes.size() <= 10));
+    }
+
+    function isValidCommunityVerification(data) {
+      return data.keys().hasAll(['complaintId', 'userId', 'vote', 'createdAt'])
+        && data.keys().hasOnly([
+          'complaintId', 'ticketId', 'userId', 'userEmail',
+          'vote', 'comment', 'distanceKm', 'createdAt'
+        ])
+        && data.complaintId is string && data.complaintId.size() <= 128
+        && data.userId is string && data.userId.size() <= 128
+        && data.vote in ['yes', 'no']
+        && data.createdAt is string && data.createdAt.size() <= 64
+        && (!('comment' in data) || (data.comment is string && data.comment.size() <= 1000));
+    }
+
+    function isValidNotification(data) {
+      return data.keys().hasAll(['recipientUid', 'recipientRole', 'title', 'read', 'createdAt'])
+        && data.keys().hasOnly([
+          'recipientUid', 'recipientRole', 'complaintId', 'ticketId',
+          'title', 'message', 'type', 'read', 'createdAt'
+        ])
+        && data.recipientUid is string && data.recipientUid.size() <= 128
+        && data.recipientRole in ['citizen', 'authority', 'admin']
+        && data.title is string && data.title.size() <= 200
+        && data.read is bool
+        && data.createdAt is string && data.createdAt.size() <= 64;
+    }
+
+    function isValidAuditLog(data) {
+      return data.keys().hasAll(['action', 'timestamp'])
+        && data.keys().hasOnly([
+          'timestamp', 'userId', 'actorId', 'email', 'role', 'actorRole',
+          'complaintId', 'ticketId', 'previousState', 'newState',
+          'action', 'portal', 'status', 'details', 'deviceInfo',
+          'verificationDetails'
+        ])
+        && data.action is string && data.action.size() <= 64
+        && data.timestamp is string && data.timestamp.size() <= 64
+        && (!('details' in data) || (data.details is string && data.details.size() <= 2000));
+    }
+
+    // --- 1. USERS COLLECTION ---
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId)
+        && (request.auth.uid == userId || isAdmin() || isAuthority());
+      allow list: if isSignedIn() && (
+        existing().email == request.auth.token.email
+        || existing().uid == request.auth.uid
+        || (isAdmin() && existing().role in ['citizen', 'authority', 'admin'])
+      );
+      allow create: if isSignedIn() && isValidId(userId) && isValidUser(incoming()) && (
+        (request.auth.uid == userId && incoming().role == 'citizen')
+        || (request.auth.uid == userId && request.auth.token.email == 'authority@crowdcivic.org' && incoming().role == 'authority')
+        || (request.auth.uid == userId && request.auth.token.email == 'admin@crowdcivic.org' && incoming().role == 'admin')
+        || (request.auth.uid == userId && isBootstrappedAdmin() && incoming().role == 'admin')
+        || isAdmin()
+      );
+      allow update: if isSignedIn() && isValidId(userId) && isValidUser(incoming()) && (
+        isAdmin()
+        || (
+          request.auth.uid == userId
+          && incoming().role == existing().role
+          && incoming().email == existing().email
+          && incoming().diff(existing()).affectedKeys().hasOnly(['uid', 'name', 'department', 'fcmToken', 'fcmUpdatedAt', 'updatedAt'])
+        )
+      );
+      allow delete: if isAdmin() && isValidId(userId);
+    }
+
+    // --- 2. ISSUES COLLECTION (PRIMARY COMPLAINTS) ---
+    match /issues/{issueId} {
+      allow get: if isSignedIn() && isValidId(issueId);
+      allow list: if isSignedIn() && (
+        existing().userId == request.auth.uid
+        || existing().status in [
+          'Submitted', 'Assigned', 'Acknowledged', 'In Progress',
+          'Under Verification', 'Resolved', 'Closed', 'Rejected', 'Resolution Failed'
+        ]
+      );
+      allow create: if isSignedIn() && isValidId(issueId) && isValidIssue(incoming())
+        && incoming().userId == request.auth.uid
+        && incoming().status == 'Submitted';
+      allow update: if isSignedIn() && isValidId(issueId) && isValidIssue(incoming()) && (
+        isAdmin()
+        || (
+          incoming().userId == existing().userId
+          && incoming().ticketId == existing().ticketId
+          && incoming().status == existing().status
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'upvotes', 'supportersCount', 'supporters', 'duplicateCount', 'evidencePhotos', 'severity', 'updatedAt'
+          ])
+        )
+        || (
+          incoming().userId == existing().userId
+          && incoming().ticketId == existing().ticketId
+          && incoming().status == existing().status
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'communityVotes', 'voteStats', 'isDisputed', 'updatedAt'
+          ])
+        )
+        || (
+          isAuthority()
+          && incoming().userId == existing().userId
+          && incoming().ticketId == existing().ticketId
+          && incoming().status in ['Assigned', 'Acknowledged', 'In Progress', 'Under Verification']
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'status', 'updatedAt', 'acknowledgedBy', 'acknowledgedAt', 'statusHistory'
+          ])
+        )
+        || (
+          isAuthority()
+          && incoming().userId == existing().userId
+          && incoming().ticketId == existing().ticketId
+          && incoming().rveOutcome in ['Verified', 'Rejected']
+          && incoming().resolutionAiAudit is map
+          && (
+            (incoming().rveOutcome == 'Verified' && incoming().status == 'Resolved')
+            || (incoming().rveOutcome == 'Rejected' && incoming().status == 'Rejected')
+          )
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'status', 'rveOutcome', 'resolutionAiAudit', 'manualReviewQueue', 'isDisputed',
+            'resolutionVideoUrl', 'resolutionVideoPath', 'resolutionVideoFrames',
+            'resolvedAt', 'resolvedBy', 'updatedAt'
+          ])
+        )
+      );
+      allow delete: if isSignedIn() && isValidId(issueId) && (
+        isAdmin()
+        || (isAuthority() && existing().status in ['Resolved', 'Closed'])
+        || (existing().userId == request.auth.uid && existing().status == 'Submitted')
+      );
+    }
+
+    // --- 3. ASSIGNMENTS COLLECTION ---
+    match /assignments/{assignmentId} {
+      allow get: if isSignedIn() && isValidId(assignmentId) && (isAuthority() || isAdmin());
+      allow list: if isSignedIn() && (existing().authorityUid == request.auth.uid || existing().department is string);
+      allow create: if isSignedIn() && isValidId(assignmentId) && isValidAssignment(incoming()) && (isAuthority() || isAdmin());
+      allow update: if isSignedIn() && isValidId(assignmentId) && isValidAssignment(incoming()) && (isAuthority() || isAdmin());
+      allow delete: if isAdmin() && isValidId(assignmentId);
+    }
+
+    // --- 4. RESOLUTION VERIFICATIONS COLLECTION (RVE RECORDS) ---
+    match /resolutionVerifications/{verificationId} {
+      allow get: if isSignedIn() && isValidId(verificationId)
+        && (isAdmin() || (isAuthority() && existing().authorityUid == request.auth.uid));
+      allow list: if isSignedIn() && existing().authorityUid == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(verificationId) && isValidResolutionVerification(incoming()) && (isAuthority() || isAdmin());
+      allow update, delete: if false;
+    }
+
+    // --- 5. MANUAL VERIFICATION QUEUE (ADMIN REVIEW OF REJECTED RVE) ---
+    match /manualVerificationQueue/{queueId} {
+      allow get: if isAdmin() && isValidId(queueId);
+      allow list: if isSignedIn() && existing().reviewStatus in [
+        'Pending Review', 'Approved by Admin', 'Returned for Rework'
+      ];
+      allow create: if isSignedIn() && isValidId(queueId) && isValidManualQueueItem(incoming()) && (isAuthority() || isAdmin());
+      allow update: if isAdmin() && isValidId(queueId) && isValidManualQueueItem(incoming())
+        && incoming().complaintId == existing().complaintId
+        && incoming().diff(existing()).affectedKeys().hasOnly(['reviewStatus', 'reviewedBy', 'reviewedAt', 'reviewNotes']);
+      allow delete: if false;
+    }
+
+    // --- 6. COMMUNITY VERIFICATIONS (OPTIONAL SUPPLEMENTARY FEEDBACK) ---
+    match /communityVerifications/{voteId} {
+      allow get: if isSignedIn() && isValidId(voteId);
+      allow list: if isSignedIn() && existing().complaintId is string && existing().userId is string;
+      allow create: if isSignedIn() && isValidId(voteId) && isValidCommunityVerification(incoming())
+        && incoming().userId == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    // --- 7. NOTIFICATIONS COLLECTION ---
+    match /notifications/{notificationId} {
+      allow get: if isSignedIn() && isValidId(notificationId)
+        && (existing().recipientUid == request.auth.uid || (existing().recipientRole == 'authority' && isAuthority()) || isAdmin());
+      allow list: if isSignedIn() && (
+        existing().recipientUid == request.auth.uid
+        || existing().recipientUid == 'ALL_AUTHORITIES'
+        || existing().recipientRole == 'authority'
+      );
+      allow create: if isSignedIn() && isValidId(notificationId) && isValidNotification(incoming());
+      allow update: if isSignedIn() && isValidId(notificationId) && isValidNotification(incoming())
+        && (existing().recipientUid == request.auth.uid || (existing().recipientRole == 'authority' && isAuthority()))
+        && incoming().diff(existing()).affectedKeys().hasOnly(['read'])
+        && incoming().read == true;
+      allow delete: if false;
+    }
+
+    // --- 8. AUDIT LOGS COLLECTION (IMMUTABLE LEDGER) ---
+    match /auditLogs/{logId} {
+      allow get: if isAdmin() && isValidId(logId);
+      allow list: if isSignedIn() && existing().timestamp is string && existing().timestamp >= '';
+      allow create: if isSignedIn() && isValidId(logId) && isValidAuditLog(incoming());
+      allow update, delete: if false;
+    }
+  }
+}

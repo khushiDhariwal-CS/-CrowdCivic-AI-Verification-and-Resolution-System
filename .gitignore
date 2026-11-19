@@ -1,0 +1,14 @@
+node_modules/
+.next/
+.next-dev/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+
+.aistudio/
+desktop.ini
+
+public/assets/aistudio/

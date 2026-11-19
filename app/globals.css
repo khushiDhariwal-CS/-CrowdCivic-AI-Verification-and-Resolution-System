@@ -1,0 +1,75 @@
+@import "tailwindcss";
+
+@theme inline {
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: var(--font-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+@layer utilities {
+  .civic-card {
+    background-color: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 1rem;
+    box-shadow: 0 2px 12px rgba(15, 41, 74, 0.04);
+  }
+
+  .civic-card-hover {
+    transition: border-color 180ms ease, box-shadow 180ms ease;
+  }
+  .civic-card-hover:hover {
+    border-color: #bfdbfe;
+    box-shadow: 0 6px 20px -4px rgba(21, 66, 123, 0.1);
+  }
+
+  .glass-card {
+    background-color: #ffffff;
+    border: 1px solid #e2e8f0;
+  }
+
+  .text-gradient-shimmer {
+    color: #15427b;
+  }
+
+  .civic-skeleton {
+    background: linear-gradient(90deg, #e2e8f0 25%, #f4f8fd 50%, #e2e8f0 75%);
+    background-size: 200% 100%;
+    animation: civicShimmer 1.6s infinite ease-in-out;
+  }
+}
+
+@keyframes civicShimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+/* Slate & Navy Scrollbar */
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+::-webkit-scrollbar-track {
+  background: #f4f8fd;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+body {
+  background-color: #f4f8fd;
+  color: #13345d;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  line-height: 1.45;
+}
+
+::selection {
+  background-color: #15427b;
+  color: #ffffff;
+}

@@ -1,0 +1,192 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "Registered citizen, municipal field authority, or executive admin account",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 200 },
+        "name": { "type": "string", "maxLength": 120 },
+        "role": { "type": "string", "enum": ["citizen", "authority", "admin"] },
+        "department": { "type": "string", "maxLength": 160 },
+        "fcmToken": { "type": "string", "maxLength": 512 },
+        "createdAt": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["email", "role"]
+    },
+    "Complaint": {
+      "title": "Civic Complaint",
+      "description": "Geotagged citizen complaint with RF-DETR detections, Gemini 2.5 Flash metadata, and RVE status",
+      "type": "object",
+      "properties": {
+        "ticketId": { "type": "string", "maxLength": 64 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "userEmail": { "type": "string", "maxLength": 200 },
+        "title": { "type": "string", "maxLength": 240 },
+        "category": { "type": "string", "maxLength": 120 },
+        "issueType": { "type": "string", "maxLength": 160 },
+        "description": { "type": "string", "maxLength": 2500 },
+        "severity": { "type": "string", "enum": ["Critical", "High", "Medium", "Low"] },
+        "department": { "type": "string", "maxLength": 200 },
+        "publicSafetyAlert": { "type": "boolean" },
+        "estimatedResolutionTime": { "type": "string", "maxLength": 120 },
+        "imageUrl": { "type": "string", "maxLength": 1000000 },
+        "imageStoragePath": { "type": "string", "maxLength": 400 },
+        "imageHash": { "type": "string", "maxLength": 64 },
+        "status": {
+          "type": "string",
+          "enum": [
+            "Submitted",
+            "Assigned",
+            "Acknowledged",
+            "In Progress",
+            "Under Verification",
+            "Resolved",
+            "Closed",
+            "Rejected",
+            "Resolution Failed"
+          ]
+        },
+        "assignedAuthorityUid": { "type": "string", "maxLength": 128 },
+        "assignedAuthorityEmail": { "type": "string", "maxLength": 200 },
+        "location": { "type": "object" },
+        "aiAnalysis": { "type": "object" },
+        "resolutionAiAudit": { "type": "object" },
+        "manualReviewQueue": { "type": "boolean" },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["ticketId", "userId", "title", "category", "severity", "status"]
+    },
+    "Assignment": {
+      "title": "Department Assignment",
+      "description": "Tracks complaint routing, department ownership, and authority acknowledgements",
+      "type": "object",
+      "properties": {
+        "complaintId": { "type": "string", "maxLength": 128 },
+        "ticketId": { "type": "string", "maxLength": 64 },
+        "department": { "type": "string", "maxLength": 200 },
+        "authorityUid": { "type": "string", "maxLength": 128 },
+        "authorityEmail": { "type": "string", "maxLength": 200 },
+        "status": { "type": "string", "maxLength": 64 },
+        "updatedAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["complaintId", "department", "authorityUid", "status"]
+    },
+    "ResolutionVerification": {
+      "title": "Resolution Verification Record",
+      "description": "Individual 3-gate sequential RVE decision record with GPS, timestamp, and Gemini 2.5 Flash audit",
+      "type": "object",
+      "properties": {
+        "complaintId": { "type": "string", "maxLength": 128 },
+        "ticketId": { "type": "string", "maxLength": 64 },
+        "authorityUid": { "type": "string", "maxLength": 128 },
+        "authorityEmail": { "type": "string", "maxLength": 200 },
+        "videoStorageUrl": { "type": "string", "maxLength": 1000 },
+        "videoStoragePath": { "type": "string", "maxLength": 400 },
+        "finalOutcome": { "type": "string", "enum": ["Verified", "Rejected"] },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["complaintId", "authorityUid", "finalOutcome", "createdAt"]
+    },
+    "ManualVerificationQueueItem": {
+      "title": "Manual Verification Queue Item",
+      "description": "RVE-rejected submissions queued for Executive Admin review",
+      "type": "object",
+      "properties": {
+        "complaintId": { "type": "string", "maxLength": 128 },
+        "ticketId": { "type": "string", "maxLength": 64 },
+        "failureGate": { "type": "string", "maxLength": 120 },
+        "rejectionReason": { "type": "string", "maxLength": 1500 },
+        "reviewStatus": {
+          "type": "string",
+          "enum": ["Pending Review", "Approved by Admin", "Returned for Rework"]
+        },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["complaintId", "ticketId", "reviewStatus", "createdAt"]
+    },
+    "CommunityVerification": {
+      "title": "Community Verification",
+      "description": "Optional supplementary citizen ground vote (never alters official RVE decision)",
+      "type": "object",
+      "properties": {
+        "complaintId": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "userEmail": { "type": "string", "maxLength": 200 },
+        "vote": { "type": "string", "enum": ["yes", "no"] },
+        "comment": { "type": "string", "maxLength": 1000 },
+        "distanceKm": { "type": "number" },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["complaintId", "userId", "vote", "createdAt"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "Citizen and Authority lifecycle notifications",
+      "type": "object",
+      "properties": {
+        "recipientUid": { "type": "string", "maxLength": 128 },
+        "recipientRole": { "type": "string", "enum": ["citizen", "authority", "admin"] },
+        "complaintId": { "type": "string", "maxLength": 128 },
+        "ticketId": { "type": "string", "maxLength": 64 },
+        "title": { "type": "string", "maxLength": 200 },
+        "message": { "type": "string", "maxLength": 1000 },
+        "type": { "type": "string", "maxLength": 64 },
+        "read": { "type": "boolean" },
+        "createdAt": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["recipientUid", "recipientRole", "title", "read", "createdAt"]
+    },
+    "AuditLog": {
+      "title": "Security Audit Log",
+      "description": "Append-only security & RVE transition audit ledger",
+      "type": "object",
+      "properties": {
+        "actorId": { "type": "string", "maxLength": 128 },
+        "actorRole": { "type": "string", "maxLength": 32 },
+        "complaintId": { "type": "string", "maxLength": 128 },
+        "previousState": { "type": "string", "maxLength": 64 },
+        "newState": { "type": "string", "maxLength": 64 },
+        "action": { "type": "string", "maxLength": 64 },
+        "timestamp": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["action", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Registered user profiles and roles"
+    },
+    "/issues/{issueId}": {
+      "schema": "Complaint",
+      "description": "Primary civic complaints collection"
+    },
+    "/assignments/{assignmentId}": {
+      "schema": "Assignment",
+      "description": "Department routing and field authority assignment records"
+    },
+    "/resolutionVerifications/{verificationId}": {
+      "schema": "ResolutionVerification",
+      "description": "RVE execution and 3-gate outcome records"
+    },
+    "/manualVerificationQueue/{queueId}": {
+      "schema": "ManualVerificationQueueItem",
+      "description": "Rejected resolution submissions queued for Executive Admin manual review"
+    },
+    "/communityVerifications/{voteId}": {
+      "schema": "CommunityVerification",
+      "description": "Optional supplementary community verification responses"
+    },
+    "/notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "In-app and FCM-linked notifications"
+    },
+    "/auditLogs/{logId}": {
+      "schema": "AuditLog",
+      "description": "Security and lifecycle transition audit logs"
+    }
+  }
+}
