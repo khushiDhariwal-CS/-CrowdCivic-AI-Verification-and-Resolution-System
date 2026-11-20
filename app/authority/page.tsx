@@ -439,10 +439,13 @@ export default function AuthorityDashboard() {
   // Get Authority's Live Geolocation
   const getAuthorityLocation = () => {
     if (!navigator.geolocation) {
-      setAuthorityGps((prev) => ({
-        ...prev,
-        error: 'Geolocation not supported by device.',
-      }));
+      setAuthorityGps({
+        latitude: null,
+        longitude: null,
+        address: '',
+        loading: false,
+        error: 'Geolocation not supported by device. Live GPS is required to record verification video.',
+      });
       return;
     }
 
@@ -497,13 +500,18 @@ export default function AuthorityDashboard() {
       },
       (err) => {
         console.warn('Authority geolocation error:', err);
-        setAuthorityGps((prev) => ({
-          ...prev,
+        setAuthorityGps({
+          latitude: null,
+          longitude: null,
+          address: '',
           loading: false,
-          error: 'GPS permission is required to verify on-site presence.',
-        }));
+          error:
+            err?.code === 1
+              ? 'Location permission denied. Allow GPS access in browser settings and click "Refresh GPS" to unlock recording.'
+              : 'Unable to lock live GPS coordinates. Enable device GPS and click "Refresh GPS".',
+        });
       },
-      { enableHighAccuracy: true, timeout: 10000 }
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
     );
   };
 
@@ -697,6 +705,31 @@ export default function AuthorityDashboard() {
     const activeStream = mediaStreamRef.current || mediaStream;
     if (!activeStream) {
       setCameraError('Camera is currently off. Click "Turn On Camera" first to start recording.');
+      return;
+    }
+
+    if (authorityGps.latitude === null || authorityGps.longitude === null) {
+      setAuditError(
+        'Live GPS lock is mandatory before starting the 30-second video. Allow location access and click "Refresh GPS".'
+      );
+      getAuthorityLocation();
+      return;
+    }
+
+    const currentDelta = getDeltaDistanceDisplay(targetIssue);
+    if (!currentDelta) {
+      setAuditError(
+        'Complaint GPS coordinates are missing, so the mandatory 20m geofence check cannot be verified.'
+      );
+      return;
+    }
+
+    if (currentDelta.meters > 20) {
+      setAuditError(
+        `Recording blocked by Gate 1 Geofence: You are ${
+          currentDelta.meters < 1000 ? `${currentDelta.meters}m` : `${currentDelta.km.toFixed(2)}km`
+        } away from the complaint site. Move within 20m and click "Refresh GPS" to unlock recording.`
+      );
       return;
     }
 
@@ -1121,14 +1154,28 @@ export default function AuthorityDashboard() {
   };
 
   const getDeltaDistanceDisplay = (issue: IssueReport | null) => {
-    if (!issue || !authorityGps.latitude || !issue.location?.latitude) return null;
-    const km =
-      Math.sqrt(
-        Math.pow(authorityGps.latitude - issue.location.latitude, 2) +
-          Math.pow((authorityGps.longitude || 0) - (issue.location.longitude || 0), 2)
-      ) * 111;
-    const meters = Math.round(km * 1000);
-    return { km, meters };
+    if (
+      !issue ||
+      authorityGps.latitude === null ||
+      authorityGps.longitude === null ||
+      issue.location?.latitude === null ||
+      issue.location?.latitude === undefined ||
+      issue.location?.longitude === null ||
+      issue.location?.longitude === undefined
+    ) {
+      return null;
+    }
+    const R = 6371000;
+    const radLat1 = (authorityGps.latitude * Math.PI) / 180;
+    const radLat2 = (issue.location.latitude * Math.PI) / 180;
+    const dLat = ((issue.location.latitude - authorityGps.latitude) * Math.PI) / 180;
+    const dLon = ((issue.location.longitude - authorityGps.longitude) * Math.PI) / 180;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(radLat1) * Math.cos(radLat2) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const meters = Math.round(R * c);
+    return { km: meters / 1000, meters };
   };
 
   if (loading) {
@@ -1143,6 +1190,8 @@ export default function AuthorityDashboard() {
   }
 
   const distanceInfo = getDeltaDistanceDisplay(targetIssue);
+  const hasLiveAuthorityGps = authorityGps.latitude !== null && authorityGps.longitude !== null;
+  const isGeofenceReady = hasLiveAuthorityGps && distanceInfo !== null && distanceInfo.meters <= 20;
 
   return (
     <div className="min-h-screen bg-[#F4F8FD] text-[#13345D] flex flex-col font-sans">
@@ -2022,7 +2071,15 @@ export default function AuthorityDashboard() {
 
               {/* Sequential 3-Gate RVE Summary Cards */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <div className="bg-white border border-[#E2E8F0] border-t-2 border-t-[#15427B] rounded-xl p-3.5 space-y-1">
+                <div
+                  className={`bg-white border rounded-xl p-3.5 space-y-1 border-t-2 ${
+                    isGeofenceReady
+                      ? 'border-[#E2E8F0] border-t-[#0E8A4E]'
+                      : hasLiveAuthorityGps && distanceInfo && distanceInfo.meters > 20
+                      ? 'border-[#FECACA] border-t-[#DC2626]'
+                      : 'border-[#E2E8F0] border-t-[#15427B]'
+                  }`}
+                >
                   <div className="flex items-center justify-between gap-1.5 text-xs font-semibold text-[#13345D]">
                     <div className="flex items-center gap-1.5">
                       {aiAuditResult?.gates ? (
@@ -2031,20 +2088,39 @@ export default function AuthorityDashboard() {
                         ) : (
                           <AlertTriangle className="w-3.5 h-3.5 text-[#DC2626]" />
                         )
-                      ) : authorityGps.latitude ? (
+                      ) : isGeofenceReady ? (
                         <Check className="w-3.5 h-3.5 text-[#0E8A4E]" />
+                      ) : hasLiveAuthorityGps && distanceInfo && distanceInfo.meters > 20 ? (
+                        <AlertTriangle className="w-3.5 h-3.5 text-[#DC2626]" />
                       ) : (
                         <Clock className="w-3.5 h-3.5 text-[#15427B]" />
                       )}
                       <span>Gate 1 · GPS Geofence (&le;20m)</span>
                     </div>
+                    <button
+                      type="button"
+                      onClick={getAuthorityLocation}
+                      disabled={authorityGps.loading || recording}
+                      className="text-[11px] font-semibold text-[#15427B] hover:text-[#0F2F5A] inline-flex items-center gap-1 disabled:opacity-50"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${authorityGps.loading ? 'animate-spin' : ''}`} />
+                      <span>Refresh GPS</span>
+                    </button>
                   </div>
-                  <p className="text-[11px] text-[#475569] leading-relaxed">
+                  <p
+                    className={`text-[11px] leading-relaxed ${
+                      !aiAuditResult?.gates && (!isGeofenceReady && (authorityGps.error || (distanceInfo && distanceInfo.meters > 20)))
+                        ? 'text-[#DC2626] font-medium'
+                        : 'text-[#475569]'
+                    }`}
+                  >
                     {aiAuditResult?.gates
                       ? aiAuditResult.gates.gate1_geofence.reason
+                      : isGeofenceReady && distanceInfo
+                      ? `Geofence locked (${distanceInfo.meters}m ≤ 20m). Ready to record live verification video.`
                       : distanceInfo
-                      ? `Current delta: ${distanceInfo.meters < 1000 ? `${distanceInfo.meters}m` : `${distanceInfo.km.toFixed(2)}km`} from complaint pin.`
-                      : authorityGps.error || 'Acquiring live GPS coordinates at the site.'}
+                      ? `Outside 20m geofence (${distanceInfo.meters < 1000 ? `${distanceInfo.meters}m` : `${distanceInfo.km.toFixed(2)}km`} away). Move within 20m to unlock recording.`
+                      : authorityGps.error || 'Acquiring live GPS coordinates — recording unlocks once GPS & 20m geofence are verified.'}
                   </p>
                 </div>
 
@@ -2106,44 +2182,76 @@ export default function AuthorityDashboard() {
               {/* Camera Controls */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-[#F4F8FD] p-4 rounded-xl border border-[#DCE7F5]">
                 <div className="text-xs">
-                  <p className="font-semibold text-[#13345D]">30-Second Live Video Requirement</p>
-                  <p className="text-[#475569] mt-0.5">
-                    Show the repaired area clearly. AI checks visual fixes, live timetag, and GPS coordinates.
+                  <p className="font-semibold text-[#13345D]">30-Second Live Video &amp; Geofence Requirement</p>
+                  <p className={`mt-0.5 ${isGeofenceReady ? 'text-[#0E8A4E] font-medium' : 'text-[#DC2626] font-medium'}`}>
+                    {isGeofenceReady && distanceInfo
+                      ? `Live GPS locked (${distanceInfo.meters}m from site — inside 20m geofence). Ready to start 30s recording.`
+                      : !hasLiveAuthorityGps
+                      ? 'GPS pending: Live location permission & GPS lock are required before recording can start.'
+                      : distanceInfo
+                      ? `Outside 20m geofence (${distanceInfo.meters < 1000 ? `${distanceInfo.meters}m` : `${distanceInfo.km.toFixed(2)}km`} away). Move within 20m and refresh GPS.`
+                      : 'Complaint GPS coordinates missing — geofence cannot be verified.'}
                   </p>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2.5 shrink-0">
                   {!recording ? (
-                    mediaStream ? (
-                      <>
+                    <>
+                      {!isGeofenceReady && (
                         <button
                           type="button"
-                          onClick={() => stopAuthorityCamera(true)}
-                          className="px-3.5 py-2.5 bg-white hover:bg-[#FEF2F2] border border-[#CBD5E1] text-[#475569] hover:text-[#DC2626] text-xs font-semibold rounded-lg flex items-center justify-center gap-1.5 transition-colors"
+                          onClick={getAuthorityLocation}
+                          disabled={authorityGps.loading}
+                          className="px-3.5 py-2.5 bg-white hover:bg-[#EFF6FF] border border-[#15427B] text-[#15427B] text-xs font-semibold rounded-lg flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50"
                         >
-                          <VideoOff className="w-3.5 h-3.5" />
-                          <span>Turn Off Camera</span>
+                          <RefreshCw className={`w-3.5 h-3.5 ${authorityGps.loading ? 'animate-spin' : ''}`} />
+                          <span>{authorityGps.loading ? 'Locking GPS...' : 'Refresh Live GPS'}</span>
                         </button>
+                      )}
+                      {mediaStream ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => stopAuthorityCamera(true)}
+                            className="px-3.5 py-2.5 bg-white hover:bg-[#FEF2F2] border border-[#CBD5E1] text-[#475569] hover:text-[#DC2626] text-xs font-semibold rounded-lg flex items-center justify-center gap-1.5 transition-colors"
+                          >
+                            <VideoOff className="w-3.5 h-3.5" />
+                            <span>Turn Off Camera</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={start30SecRecording}
+                            disabled={!isGeofenceReady}
+                            className={`w-full sm:w-auto px-5 py-2.5 text-xs font-semibold rounded-lg flex items-center justify-center gap-2 transition-colors ${
+                              isGeofenceReady
+                                ? 'bg-[#15427B] hover:bg-[#0F2F5A] text-white'
+                                : 'bg-[#E2E8F0] text-[#64748B] cursor-not-allowed'
+                            }`}
+                          >
+                            <Video className="w-4 h-4" />
+                            <span>
+                              {!hasLiveAuthorityGps
+                                ? 'Waiting for Live GPS...'
+                                : !isGeofenceReady
+                                ? 'Outside 20m Geofence'
+                                : recordedFrames.length > 0
+                                ? 'Re-record 30s Video'
+                                : 'Start 30s Recording'}
+                            </span>
+                          </button>
+                        </>
+                      ) : (
                         <button
                           type="button"
-                          onClick={start30SecRecording}
-                          className="w-full sm:w-auto px-5 py-2.5 bg-[#15427B] hover:bg-[#0F2F5A] text-white text-xs font-semibold rounded-lg flex items-center justify-center gap-2 transition-colors"
+                          onClick={requestAuthorityCamera}
+                          disabled={cameraLoading}
+                          className="w-full sm:w-auto px-5 py-2.5 bg-[#15427B] hover:bg-[#0F2F5A] disabled:opacity-50 text-white text-xs font-semibold rounded-lg flex items-center justify-center gap-2 transition-colors"
                         >
                           <Video className="w-4 h-4" />
-                          <span>{recordedFrames.length > 0 ? 'Re-record 30s Video' : 'Start 30s Recording'}</span>
+                          <span>{cameraLoading ? 'Starting Camera...' : 'Turn On Camera'}</span>
                         </button>
-                      </>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={requestAuthorityCamera}
-                        disabled={cameraLoading}
-                        className="w-full sm:w-auto px-5 py-2.5 bg-[#15427B] hover:bg-[#0F2F5A] disabled:opacity-50 text-white text-xs font-semibold rounded-lg flex items-center justify-center gap-2 transition-colors"
-                      >
-                        <Video className="w-4 h-4" />
-                        <span>{cameraLoading ? 'Starting Camera...' : 'Turn On Camera'}</span>
-                      </button>
-                    )
+                      )}
+                    </>
                   ) : (
                     <>
                       <div className="px-4 py-2.5 bg-[#FEF2F2] border border-[#FCA5A5] text-[#DC2626] text-xs font-bold rounded-lg flex items-center gap-2">
