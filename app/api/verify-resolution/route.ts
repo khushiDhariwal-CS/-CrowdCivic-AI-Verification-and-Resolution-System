@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAdminDb, verifyBearerIdToken } from '@/lib/firebase-admin';
+import { verifyBearerIdToken } from '@/lib/firebase-admin';
 import {
   executeRVE,
   extractKeyframesFromVideoBuffer,
@@ -175,19 +175,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Fetch authoritative complaint snapshot from Firestore via REST (authenticated as caller) or Admin SDK
-    let dbIssueData: any = await fetchIssueViaRest(issueId, authHeader);
-    if (!dbIssueData) {
-      try {
-        const adminSnap = await withTimeout(
-          getAdminDb().collection('issues').doc(issueId).get(),
-          2500,
-          'Admin Firestore read'
-        );
-        if (adminSnap.exists) dbIssueData = adminSnap.data();
-      } catch {
-        // Starter Tier without IAM falls back gracefully to submitted complaint snapshot
-      }
-    }
+    const dbIssueData: any = await fetchIssueViaRest(issueId, authHeader);
 
     const effectiveTicketId = dbIssueData?.ticketId || issueDetails?.ticketId || issueId;
     const previousStatus = dbIssueData?.status || 'In Progress';
@@ -441,23 +429,7 @@ export async function POST(req: NextRequest) {
     // Attempt server-side Admin SDK persistence with a strict 3s timeout.
     // On Starter Tier projects without IAM permissions, immediately delegate persistence
     // to the authenticated Authority client instead of hanging on unauthenticated Node SDK calls.
-    let persistedVia: 'admin' | 'client_required' = 'admin';
-    try {
-      const adminDb = getAdminDb();
-      await withTimeout(
-        Promise.all([
-          adminDb.collection('issues').doc(issueId).update(issueUpdatePayload),
-          adminDb.collection('resolutionVerifications').add(verificationRecord),
-          adminDb.collection('auditLogs').add(auditEntry),
-          ...(manualQueueItem ? [adminDb.collection('manualVerificationQueue').add(manualQueueItem)] : []),
-          ...notificationsToCreate.map((n) => adminDb.collection('notifications').add(n)),
-        ]),
-        3000,
-        'Admin Firestore persistence'
-      );
-    } catch {
-      persistedVia = 'client_required';
-    }
+    const persistedVia = 'client_required' as const;
 
     return NextResponse.json({
       success: true,
