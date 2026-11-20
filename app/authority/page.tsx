@@ -878,7 +878,7 @@ export default function AuthorityDashboard() {
       let videoStorageUrl: string | null = null;
       let videoStoragePath: string | null = null;
 
-      if (recordedVideoBlob) {
+      if (recordedVideoBlob && process.env.NEXT_PUBLIC_ENABLE_FIREBASE_STORAGE === 'true') {
         const uploadRes = await uploadResolutionVideoToStorage({
           complaintId: targetIssue.id,
           videoBlob: recordedVideoBlob,

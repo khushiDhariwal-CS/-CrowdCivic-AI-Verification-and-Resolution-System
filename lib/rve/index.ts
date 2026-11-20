@@ -4,7 +4,6 @@ import { promisify } from 'util';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
-import { calculateHaversineMeters } from '../duplicates';
 import {
   RepairQuality,
   RFDETRDetection,
@@ -16,6 +15,34 @@ import {
 } from '../types/civic';
 
 const execFileAsync = promisify(execFile);
+
+function calculateHaversineMeters(
+  lat1?: number | null,
+  lon1?: number | null,
+  lat2?: number | null,
+  lon2?: number | null
+): number {
+  if (
+    lat1 === null || lat1 === undefined ||
+    lon1 === null || lon1 === undefined ||
+    lat2 === null || lat2 === undefined ||
+    lon2 === null || lon2 === undefined ||
+    Number.isNaN(Number(lat1)) || Number.isNaN(Number(lon1)) ||
+    Number.isNaN(Number(lat2)) || Number.isNaN(Number(lon2))
+  ) {
+    return Infinity;
+  }
+  const R = 6371000;
+  const radLat1 = (Number(lat1) * Math.PI) / 180;
+  const radLat2 = (Number(lat2) * Math.PI) / 180;
+  const dLat = ((Number(lat2) - Number(lat1)) * Math.PI) / 180;
+  const dLon = ((Number(lon2) - Number(lon1)) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(radLat1) * Math.cos(radLat2) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return Math.round(R * c);
+}
 
 export const DEFAULT_RVE_GEOFENCE_MAX_METERS = Number(
   process.env.RVE_GEOFENCE_MAX_METERS || 20
