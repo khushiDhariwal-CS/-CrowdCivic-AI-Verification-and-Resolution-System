@@ -213,7 +213,6 @@ export default function CitizenDashboard() {
   const [severity, setSeverity] = useState('Medium');
   const [department, setDepartment] = useState('Public Works Dept');
   const [description, setDescription] = useState('');
-  const [manualAddress, setManualAddress] = useState('');
 
   // Geolocation
   const [location, setLocation] = useState<LocationState>({
@@ -606,7 +605,11 @@ export default function CitizenDashboard() {
     if (!navigator.geolocation) {
       setLocation((prev) => ({
         ...prev,
-        error: 'Geolocation is not supported by your browser',
+        latitude: null,
+        longitude: null,
+        address: '',
+        loading: false,
+        error: 'Geolocation is not supported by your browser. Live GPS access is mandatory to report a civic issue.',
       }));
       return;
     }
@@ -654,7 +657,6 @@ export default function CitizenDashboard() {
               loading: false,
               error: null,
             });
-            setManualAddress(formatted);
             return;
           }
         } catch {
@@ -673,15 +675,23 @@ export default function CitizenDashboard() {
           loading: false,
           error: null,
         });
-        setManualAddress(fallbackAddr);
       },
       (err) => {
         console.warn('Geolocation error:', err);
-        setLocation((prev) => ({
-          ...prev,
+        const deniedMsg =
+          err?.code === 1
+            ? 'Location permission is mandatory to report a civic issue. Please allow GPS access in your browser settings and click "Retry GPS".'
+            : 'Unable to acquire live GPS coordinates. Location access is mandatory — please enable device GPS and click "Retry GPS".';
+        setLocation({
+          latitude: null,
+          longitude: null,
+          accuracy: null,
+          address: '',
+          city: '',
+          area: '',
           loading: false,
-          error: 'Location access denied or unavailable. Please specify address manually.',
-        }));
+          error: deniedMsg,
+        });
       },
       { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
     );
@@ -1059,6 +1069,14 @@ export default function CitizenDashboard() {
       });
       return;
     }
+    if (location.latitude === null || location.longitude === null) {
+      setPortalBanner({
+        type: 'error',
+        message: 'Live GPS location access is mandatory to report a complaint. Please allow location permission and click "Retry GPS".',
+      });
+      getGeolocation();
+      return;
+    }
     if (aiResult?.isCivicIssue === false || aiResult?.confidenceScore === 0) {
       setPortalBanner({
         type: 'error',
@@ -1093,7 +1111,7 @@ export default function CitizenDashboard() {
         location: {
           latitude: location.latitude,
           longitude: location.longitude,
-          address: manualAddress || location.address || 'Location Tagged',
+          address: location.address || `GPS Pin (${location.latitude.toFixed(4)}° N, ${location.longitude.toFixed(4)}° E)`,
           city: location.city || 'City District',
           area: location.area || 'Neighborhood',
         },
@@ -1367,7 +1385,6 @@ export default function CitizenDashboard() {
     setIssueType('');
     setDescription('');
     setSubmittedTicket(null);
-    setManualAddress('');
   };
 
   const handleSignOut = async () => {
@@ -2182,17 +2199,27 @@ export default function CitizenDashboard() {
                     )}
                   </div>
 
-                  {/* SECTION 2: GPS LOCATION CONFIRMED */}
-                  <div className="p-4 rounded-xl bg-[#F4F8FD] border border-[#DCE7F5] space-y-3">
-                    <div className="flex items-center justify-between">
+                  {/* SECTION 2: MANDATORY GPS LOCATION (NO MANUAL ENTRY) */}
+                  <div
+                    className={`p-4 rounded-xl border space-y-3 ${
+                      location.latitude !== null && location.longitude !== null
+                        ? 'bg-[#F4F8FD] border-[#DCE7F5]'
+                        : 'bg-[#FEF2F2] border-[#FECACA]'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2 text-xs font-bold text-[#13345D]">
-                        <MapPin className="w-4 h-4 text-[#15427B]" />
+                        <MapPin
+                          className={`w-4 h-4 ${
+                            location.latitude !== null ? 'text-[#0E8A4E]' : 'text-[#DC2626]'
+                          }`}
+                        />
                         <span>
                           {location.loading
-                            ? 'Acquiring GPS coordinates...'
-                            : location.latitude
-                            ? 'GPS location confirmed'
-                            : 'Geolocation'}
+                            ? 'Acquiring mandatory GPS coordinates...'
+                            : location.latitude !== null
+                            ? '2. Verified GPS Location (Mandatory)'
+                            : '2. Live GPS Location Required *'}
                         </span>
                       </div>
                       <button
@@ -2202,31 +2229,40 @@ export default function CitizenDashboard() {
                         className="text-xs text-[#15427B] hover:text-[#0F2F5A] flex items-center gap-1 font-semibold disabled:opacity-50"
                       >
                         <RefreshCw className={`w-3 h-3 ${location.loading ? 'animate-spin' : ''}`} />
-                        <span>Refresh GPS</span>
+                        <span>{location.latitude !== null ? 'Refresh GPS' : 'Retry GPS'}</span>
                       </button>
                     </div>
 
-                    {location.error ? (
-                      <p className="text-xs text-[#DC2626]">{location.error}</p>
-                    ) : location.latitude ? (
-                      <p className="text-xs font-mono text-[#475569]">
-                        {location.latitude.toFixed(4)}° N, {location.longitude?.toFixed(4)}° E
-                        {location.accuracy ? ` · ±${Math.round(location.accuracy)}m accuracy` : ''}
-                      </p>
-                    ) : null}
-
-                    <div>
-                      <label className="block text-xs font-medium text-[#475569] mb-1">
-                        Street Address or Landmark
-                      </label>
-                      <input
-                        type="text"
-                        value={manualAddress}
-                        onChange={(e) => setManualAddress(e.target.value)}
-                        placeholder="Enter or refine street address, ward, or nearby landmark"
-                        className="w-full bg-white border border-[#CBD5E1] rounded-lg px-3.5 py-2.5 text-sm text-[#13345D] placeholder-[#94A3B8] focus:outline-none focus:border-[#15427B] focus:ring-2 focus:ring-[#15427B]/15"
-                      />
-                    </div>
+                    {location.latitude !== null && location.longitude !== null ? (
+                      <div className="space-y-1.5">
+                        <p className="text-xs font-mono text-[#0E8A4E] font-medium">
+                          {location.latitude.toFixed(5)}° N, {location.longitude.toFixed(5)}° E
+                          {location.accuracy ? ` · ±${Math.round(location.accuracy)}m accuracy` : ''}
+                        </p>
+                        <div className="bg-white border border-[#DCE7F5] rounded-lg px-3.5 py-2.5 text-sm text-[#13345D]">
+                          <span className="block text-[11px] font-semibold text-[#64748B] mb-0.5">
+                            Auto-Detected GPS Address (Read-Only)
+                          </span>
+                          <span>{location.address || `GPS Pin (${location.latitude.toFixed(4)}° N, ${location.longitude.toFixed(4)}° E)`}</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        <p className="text-xs text-[#DC2626] font-medium">
+                          {location.error ||
+                            'Live browser GPS access is mandatory to report a civic issue. Manual location entry is disabled.'}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={getGeolocation}
+                          disabled={location.loading}
+                          className="px-3.5 py-2 rounded-lg bg-[#15427B] hover:bg-[#0F2F5A] text-white text-xs font-semibold inline-flex items-center gap-1.5 disabled:opacity-50"
+                        >
+                          <MapPin className="w-3.5 h-3.5" />
+                          <span>{location.loading ? 'Requesting GPS...' : 'Allow & Acquire Live GPS'}</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   {/* SECTION 3: ISSUE DETAILS */}
@@ -2416,9 +2452,9 @@ export default function CitizenDashboard() {
                     </button>
                     <button
                       type="submit"
-                      disabled={submitting || !selectedImage || aiResult?.isCivicIssue === false || aiResult?.confidenceScore === 0}
+                      disabled={submitting || !selectedImage || location.latitude === null || location.longitude === null || aiResult?.isCivicIssue === false || aiResult?.confidenceScore === 0}
                       className={`px-6 py-2.5 text-xs font-semibold rounded-lg flex items-center justify-center gap-2 transition-colors ${
-                        aiResult?.isCivicIssue === false || aiResult?.confidenceScore === 0
+                        location.latitude === null || location.longitude === null || aiResult?.isCivicIssue === false || aiResult?.confidenceScore === 0
                           ? 'bg-[#E2E8F0] text-[#64748B] cursor-not-allowed'
                           : 'bg-[#15427B] hover:bg-[#0F2F5A] text-white disabled:opacity-50'
                       }`}
