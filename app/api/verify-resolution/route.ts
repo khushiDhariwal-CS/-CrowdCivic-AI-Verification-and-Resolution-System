@@ -9,6 +9,7 @@ import { RFDETRDetection } from '@/lib/types/civic';
 import defaultConfig from '../../../firebase-applet-config.json';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 
 const MAX_FFMPEG_VIDEO_BYTES = 12 * 1024 * 1024; // 12 MB ceiling for fast FFmpeg decode
 

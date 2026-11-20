@@ -457,20 +457,68 @@ export default function AuthorityDashboard() {
         const lng = pos.coords.longitude;
 
         try {
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 3500);
+          const MAX_MULTIPART_BYTES = 3 * 1024 * 1024;
 
-          const res = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`,
-            {
-              headers: { 'Accept-Language': 'en' },
-              signal: controller.signal,
-            }
-          );
-          clearTimeout(timeoutId);
+      const sendJsonFallback = async (): Promise<Response> => {
+        const jsonController = new AbortController();
+        const jsonTimer = setTimeout(() => jsonController.abort(), 50000);
+        try {
+          return await fetch('/api/verify-resolution', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
+            },
+            body: JSON.stringify(metadata),
+            signal: jsonController.signal,
+          });
+        } finally {
+          clearTimeout(jsonTimer);
+        }
+      };
 
-          if (res.ok) {
-            const data = await res.json();
+      let res: Response;
+      if (recordedVideoBlob && recordedVideoBlob.size <= MAX_MULTIPART_BYTES) {
+        const mpController = new AbortController();
+        const mpTimer = setTimeout(() => mpController.abort(), 50000);
+        try {
+          const formData = new FormData();
+          formData.append('video', recordedVideoBlob, `resolution_${targetIssue.ticketId}.webm`);
+          formData.append('metadata', JSON.stringify(metadata));
+          res = await fetch('/api/verify-resolution', {
+            method: 'POST',
+            headers: idToken ? { Authorization: `Bearer ${idToken}` } : undefined,
+            body: formData,
+            signal: mpController.signal,
+          });
+          if (res.status === 413 && recordedFrames.length >= 3) {
+            res = await sendJsonFallback();
+          }
+        } catch (mpErr: any) {
+          clearTimeout(mpTimer);
+          if (mpErr?.name !== 'AbortError' && recordedFrames.length >= 3) {
+            setVerifyingStage('Retrying with compact keyframe payload...');
+            res = await sendJsonFallback();
+          } else {
+            throw mpErr;
+          }
+        } finally {
+          clearTimeout(mpTimer);
+        }
+      } else {
+        res = await sendJsonFallback();
+      }
+
+      const rawText = await res.text();
+      let data: any = {};
+      try {
+        data = rawText ? JSON.parse(rawText) : {};
+      } catch {
+        data = {
+          success: false,
+          error: `Verification server returned unexpected response (HTTP ${res.status}). Please retry.`,
+        };
+      }
             const addr = data.address || {};
             const road = addr.road || addr.suburb || addr.neighbourhood || '';
             const city = addr.city || addr.town || addr.village || 'City Zone';
@@ -1000,7 +1048,7 @@ export default function AuthorityDashboard() {
         setAuditError(data.error || 'Failed to analyze video verification proof.');
       }
     } catch (err: any) {
-      console.error('Error verifying video with RVE:', err);
+      console.warn('Notice verifying video with RVE:', err?.message || err);
       if (err?.name === 'AbortError') {
         setAuditError('Verification timed out after 45 seconds. Please check your connection and try submitting again.');
       } else {
