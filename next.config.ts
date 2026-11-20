@@ -20,6 +20,7 @@ const nextConfig: NextConfig = {
     ],
   },
   transpilePackages: ['motion'],
+  serverExternalPackages: ['firebase-admin', 'sharp'],
 };
 
 export default nextConfig;

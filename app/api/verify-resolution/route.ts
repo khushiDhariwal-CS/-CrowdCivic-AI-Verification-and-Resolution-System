@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyBearerIdToken } from '@/lib/firebase-admin';
 import {
   executeRVE,
   extractKeyframesFromVideoBuffer,
@@ -8,6 +7,7 @@ import {
 import { RFDETRDetection } from '@/lib/types/civic';
 import defaultConfig from '../../../firebase-applet-config.json';
 
+export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
@@ -53,6 +53,45 @@ function decodeFirestoreValue(val: any): any {
  * Fetches an issue document via Firestore REST API using the caller's Firebase ID token.
  * Works on both Starter Tier (no IAM needed) and Blaze Tier while enforcing firestore.rules.
  */
+async function verifyFirebaseIdTokenRest(authHeader: string | null): Promise<{
+  verified: boolean;
+  decoded: { uid: string; email?: string } | null;
+}> {
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return { verified: false, decoded: null };
+  }
+  const idToken = authHeader.slice('Bearer '.length).trim();
+  const apiKey = process.env.NEXT_PUBLIC_FIREBASE_API_KEY || defaultConfig.apiKey;
+  if (!idToken || !apiKey) {
+    return { verified: false, decoded: null };
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 4000);
+  try {
+    const res = await fetch(
+      `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${encodeURIComponent(apiKey)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken }),
+        signal: controller.signal,
+      }
+    );
+    if (!res.ok) return { verified: false, decoded: null };
+    const data = await res.json();
+    const user = Array.isArray(data?.users) ? data.users[0] : null;
+    if (!user?.localId) return { verified: false, decoded: null };
+    return {
+      verified: true,
+      decoded: { uid: String(user.localId), email: user.email ? String(user.email) : undefined },
+    };
+  } catch {
+    return { verified: false, decoded: null };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function fetchIssueViaRest(
   issueId: string,
   authHeader: string | null
@@ -104,11 +143,7 @@ export async function POST(req: NextRequest) {
     const authHeader = req.headers.get('authorization');
 
     // Verify caller Firebase ID Token when provided (bounded timeout)
-    const authCheck = await withTimeout(
-      verifyBearerIdToken(authHeader),
-      4000,
-      'ID token verification'
-    ).catch(() => ({ verified: false, decoded: null }));
+    const authCheck = await verifyFirebaseIdTokenRest(authHeader);
 
     let issueId = '';
     let authorityUid = authCheck.decoded?.uid || '';
